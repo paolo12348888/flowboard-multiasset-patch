@@ -342,6 +342,7 @@ h2 { margin: 0 0 10px; font: 600 13px var(--mono); color: var(--muted); }
       this.liqs = [];
       this.last = null;
       this.lastTradeMs = 0;
+      this.firstTradeMs = 0;
       this.smooth = null;
       this.regime = "flat";
     }
@@ -364,6 +365,7 @@ h2 { margin: 0 0 10px; font: 600 13px var(--mono); color: var(--muted); }
       const p = +d.p, q2 = +d.q, sec = Math.floor(d.T / 1e3);
       this.last = p;
       this.lastTradeMs = Date.now();
+      if (!this.firstTradeMs) this.firstTradeMs = d.T;
       let b = this.bins[this.bins.length - 1];
       if (!b || sec > b.s) {
         b = { s: sec, buy: 0, sell: 0, lbuy: 0, lsell: 0 };
@@ -429,7 +431,10 @@ h2 { margin: 0 0 10px; font: 600 13px var(--mono); color: var(--muted); }
       const dayPct = (price / dayOpen - 1) * 100;
       const { windowsMin, blend } = this.cfg.flow;
       const flows = windowsMin.map((m) => flowFromBins(this.bins, now, m * 6e4));
-      const flowX = flows.reduce((s, f, i) => s + f.x * blend[i], 0);
+      const warm = this.firstTradeMs ? Math.max(0, now - this.firstTradeMs) : 0;
+      const cov = (m) => Math.min(1, warm / (m * 6e4));
+      const flowX = flows.reduce((s, f, i) => s + f.x * blend[i] * cov(windowsMin[i]), 0);
+      const warmup = cov(windowsMin[windowsMin.length - 1]);
       const f5 = flows[Math.max(0, windowsMin.indexOf(5))];
       const lotTot = f5.lbuy + f5.lsell;
       const lotConf = Math.min(1, lotTot * price / (5 * this.cfg.largeLotUsd));
@@ -463,7 +468,7 @@ h2 { margin: 0 0 10px; font: 600 13px var(--mono); color: var(--muted); }
         z,
         parts,
         score,
-        raw: { flowX, flows, f5, cvd, obi: this.obi, oi, dP, lotTot },
+        raw: { flowX, warmup, flows, f5, cvd, obi: this.obi, oi, dP, lotTot },
         funding: this.funding,
         nextFunding: this.nextFunding,
         spreadBps,
@@ -1011,7 +1016,7 @@ h2 { margin: 0 0 10px; font: 600 13px var(--mono); color: var(--muted); }
       rowEl[id].v.textContent = txt;
       meter(rowEl[id], sc);
     };
-    set("flow", `${sgn(r.flowX * 100, f1)}%`, p.flow);
+    set("flow", `${sgn(r.flowX * 100, f1)}%${r.warmup < 1 ? ` \xB7 in raccolta ${Math.floor(r.warmup * 100)}%` : ""}`, p.flow);
     set("large", r.lotTot > 0 ? `\u0394 ${sgn(r.f5.lbuy - r.f5.lsell, f1)} ${base}` : "nessun lotto", p.large);
     set("cvd", `\u0394 ${sgn(r.cvd.delta, f1)} ${base}`, p.cvd);
     rowEl.cvd.k.querySelector(".tag")?.remove();
