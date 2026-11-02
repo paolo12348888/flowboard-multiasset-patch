@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#06161c">
+  <title>Flowboard · order flow in tempo reale</title>
+  <meta name="description" content="Dashboard order-flow per futures crypto: flusso taker, CVD, order book, VWAP e open interest in un unico verdetto.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+:root {
+  --bg: #06161c; --panel: #0a1f27; --line: #15343d; --text: #e9f3f4; --muted: #7d9aa1;
+  --buy: #3b9bff; --sell: #ff6a2b; --amber: #ffb020; --live: #e5251f; --warn: #ff3d71;
+  --num: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body { margin: 0; color: var(--text); font: 14px/1.45 var(--mono); -webkit-text-size-adjust: 100%; }
+.app { max-width: 560px; margin: 0 auto; padding: max(14px, env(safe-area-inset-top)) 14px max(24px, env(safe-area-inset-bottom)); }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.id { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+h1 { margin: 0; font: 700 40px/1 var(--num); letter-spacing: .01em; }
+.status { font: 600 11px/1 var(--mono); padding: 5px 7px; border-radius: 3px; background: #24404a; color: var(--text); }
+.status.live { background: var(--live); }
+.status.demo { background: var(--amber); color: #2a1c00; }
+.status.err { background: var(--warn); }
+.tf { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: 500 12px var(--mono); padding: 5px 6px; }
+.px { text-align: right; }
+.price { font: 700 44px/1 var(--num); font-variant-numeric: tabular-nums; }
+.day { font: 500 12px var(--mono); color: var(--muted); }
+.day.up { color: var(--buy); } .day.dn { color: var(--sell); }
+.sub { margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
+
+.bar-row { display: flex; align-items: center; gap: 8px; }
+.mini { font: 600 12px var(--mono); min-width: 3.4em; }
+.mini.buy { color: var(--buy); } .mini.sell { color: var(--sell); text-align: right; }
+.bar { flex: 1; display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line); }
+.bar i { display: block; height: 100%; transition: width .5s ease; }
+.bar i:first-child { background: var(--buy); } .bar i:last-child { background: var(--sell); }
+.big-bar { height: 12px; margin: 8px 0 14px; }
+
+.headline { margin: 12px 0; padding: 8px 10px; border: 1px solid; border-radius: 3px; font: 700 20px/1.1 var(--num); letter-spacing: .02em; }
+.headline.buy { color: var(--buy); border-color: var(--buy); background: rgba(59,155,255,.07); }
+.headline.sell { color: var(--sell); border-color: var(--sell); background: rgba(255,106,43,.07); }
+.headline.flat { color: var(--muted); border-color: var(--line); }
+
+.chart-wrap { position: relative; }
+#chart { width: 100%; height: 360px; display: block; touch-action: pan-y; }
+.ohlc { position: absolute; left: 4px; top: 2px; font: 500 10px var(--mono); color: var(--muted); pointer-events: none; text-shadow: 0 0 4px var(--bg); }
+
+.reading { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+h2 { margin: 0 0 10px; font: 600 13px var(--mono); color: var(--muted); }
+.big { display: grid; grid-template-columns: auto 1fr auto; align-items: end; gap: 12px; }
+.side b { display: block; font: 700 56px/.9 var(--num); font-variant-numeric: tabular-nums; }
+.side span { font-size: 11px; color: var(--muted); }
+.side.buy b { color: var(--buy); } .side.sell { text-align: right; } .side.sell b { color: var(--sell); }
+.verdict { text-align: center; font: 700 18px/1.1 var(--num); padding-bottom: 6px; }
+.verdict.buy { color: var(--buy); } .verdict.sell { color: var(--sell); } .verdict.flat { color: var(--muted); }
+
+.rows { list-style: none; margin: 0; padding: 0; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.row .k { font-size: 12px; }
+.row .k small { display: block; color: var(--muted); font-size: 10.5px; }
+.row .v { text-align: right; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; }
+.meter { grid-column: 1 / -1; position: relative; height: 4px; background: var(--line); border-radius: 2px; }
+.meter::after { content: ""; position: absolute; left: 50%; top: -2px; width: 1px; height: 8px; background: var(--muted); }
+.meter i { position: absolute; top: 0; height: 100%; border-radius: 2px; transition: left .4s ease, width .4s ease; }
+.meter i.pos { background: var(--buy); } .meter i.neg { background: var(--sell); }
+.tag { display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 2px; font-size: 10px; color: #fff; background: var(--warn); }
+.note { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; }
+
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin-top: 18px; background: var(--line); border: 1px solid var(--line); }
+.stat { background: var(--bg); padding: 10px; }
+.stat span { display: block; color: var(--muted); font-size: 11px; }
+.stat b { font: 600 22px/1.2 var(--num); font-variant-numeric: tabular-nums; }
+.stat small { color: var(--muted); font-size: 10.5px; }
+
+.foot { margin-top: 20px; color: var(--muted); font-size: 11px; }
+.foot p { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .bar i, .meter i { transition: none; } }
+@media (min-width: 700px) { #chart { height: 420px; } .app { padding-top: 28px; } }
+
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <div class="id">
+      <span id="status" class="status" role="status">connessione…</span>
+      <h1 id="sym">BTC</h1>
+      <select id="tf" class="tf" aria-label="Timeframe"></select>
+    </div>
+    <div class="px">
+      <div id="price" class="price">–</div>
+      <div id="dayPct" class="day">–</div>
+    </div>
+  </header>
+  <p id="sub" class="sub">Perpetual · dati Binance Futures</p>
+
+  <section class="bar-row" aria-label="Compratori contro venditori">
+    <span id="bPctMini" class="mini buy">–</span>
+    <div class="bar"><i id="barBuy"></i><i id="barSell"></i></div>
+    <span id="sPctMini" class="mini sell">–</span>
+  </section>
+
+  <div id="headline" class="headline flat">In attesa dei dati</div>
+
+  <section class="chart-wrap">
+    <canvas id="chart" aria-label="Grafico a candele con VWAP e delta di volume"></canvas>
+    <div id="ohlc" class="ohlc" aria-live="off"></div>
+  </section>
+
+  <section class="reading" aria-labelledby="rd">
+    <h2 id="rd">Lettura del sistema</h2>
+    <div class="big">
+      <div class="side buy"><b id="bPct">–</b><span>compratori</span></div>
+      <div id="verdict" class="verdict">–</div>
+      <div class="side sell"><b id="sPct">–</b><span>venditori</span></div>
+    </div>
+    <div class="bar big-bar"><i id="barBuy2"></i><i id="barSell2"></i></div>
+    <ul id="rows" class="rows"></ul>
+    <p id="note" class="note"></p>
+  </section>
+
+  <section class="stats" id="stats"></section>
+
+  <footer class="foot">
+    <p>Strumento informativo, non è consulenza finanziaria. Il verdetto descrive l’aggressività recente del mercato: non prevede il prezzo. I futures a leva possono azzerare il capitale.</p>
+  </footer>
+</main>
+<script>
+(() => {
+  // src/config.js
+  var CONFIG = {
+    symbol: "BTCUSDT",
+    // Binance USDⓈ-M Futures (dati pubblici, nessuna chiave API).
+    // Se il tuo paese è geo-bloccato (HTTP 451) cambia host o usa un proxy.
+    rest: "https://fapi.binance.com",
+    ws: "wss://fstream.binance.com/stream",
+    defaultTf: 10,
+    // minuti; qualsiasi N è ammesso (si aggrega dalle candele a 1m)
+    timeframes: [1, 5, 10, 15, 30, 60],
+    // Soglia "lotto grande" in USD nozionali per singolo aggTrade (indipendente dall'asset: ?lot=250000 per cambiarla).
+    largeLotUsd: 15e4,
+    // Ancoraggio del VWAP: 'utc' (crypto) | 'us' (apertura cash USA 09:30 NY, per indici/azioni) | 'HH:MM' UTC. URL: ?session=us
+    session: "utc",
+    flow: { windowsMin: [1, 5, 15], blend: [0.25, 0.5, 0.25] },
+    cvdWindowMin: 30,
+    book: { levels: 20, decayBps: 8, emaAlpha: 0.2 },
+    oiWindowMin: 5,
+    // Pesi del punteggio composito (si rinormalizzano se una componente manca).
+    weights: { flow: 0.3, large: 0.1, cvd: 0.15, obi: 0.15, vwap: 0.2, oi: 0.1 },
+    smoothing: 0.12,
+    // EMA applicata al punteggio a ogni tick (250 ms)
+    regime: { enter: 0.15, exit: 0.05 },
+    // isteresi per evitare flicker del verdetto
+    tickMs: 250
+  };
+
+  // src/metrics.js
+  var MIN = 6e4;
+  var DAY = 864e5;
+  var clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  var squash = (x, scale) => Math.tanh(x / scale);
+  var ema = (prev, x, a) => prev == null ? x : prev + a * (x - prev);
+  function withVwap(c1m, sessionId = (t) => Math.floor(t / DAY)) {
+    let day = null, pv = 0, v = 0, p2v = 0;
+    return c1m.map((c) => {
+      const d = sessionId(c.t);
+      if (d !== day) {
+        day = d;
+        pv = 0;
+        v = 0;
+        p2v = 0;
+      }
+      const tp = (c.h + c.l + c.c) / 3;
+      pv += tp * c.v;
+      v += c.v;
+      p2v += tp * tp * c.v;
+      const vwap = v > 0 ? pv / v : tp;
+      const sd = v > 0 ? Math.sqrt(Math.max(0, p2v / v - vwap * vwap)) : 0;
+      return { ...c, vwap, sd };
+    });
+  }
+  function aggregate(c1m, n) {
+    if (n <= 1) return c1m.slice();
+    const span = n * MIN, out = [];
+    let cur = null;
+    for (const c of c1m) {
+      const b = Math.floor(c.t / span) * span;
+      if (!cur || cur.t !== b) {
+        cur = { t: b, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v, bv: c.bv, vwap: c.vwap, sd: c.sd };
+        out.push(cur);
+      } else {
+        cur.h = Math.max(cur.h, c.h);
+        cur.l = Math.min(cur.l, c.l);
+        cur.c = c.c;
+        cur.v += c.v;
+        cur.bv += c.bv;
+        cur.vwap = c.vwap;
+        cur.sd = c.sd;
+      }
+    }
+    return out;
+  }
+  function flowFromBins(bins, nowMs, windowMs) {
+    const from = nowMs - windowMs;
+    let buy = 0, sell = 0, lbuy = 0, lsell = 0;
+    for (let i = bins.length - 1; i >= 0; i--) {
+      const b = bins[i];
+      if (b.s * 1e3 < from) break;
+      buy += b.buy;
+      sell += b.sell;
+      lbuy += b.lbuy;
+      lsell += b.lsell;
+    }
+    const tot = buy + sell, ltot = lbuy + lsell;
+    return { buy, sell, lbuy, lsell, x: tot > 0 ? (buy - sell) / tot : 0, lx: ltot > 0 ? (lbuy - lsell) / ltot : 0 };
+  }
+  function cvdSignal(c1m, n) {
+    const w = c1m.slice(-n);
+    let d = 0, v = 0;
+    for (const c of w) {
+      d += 2 * c.bv - c.v;
+      v += c.v;
+    }
+    const x = v > 0 ? d / v : 0;
+    const pc = w.length > 1 ? w[w.length - 1].c / w[0].o - 1 : 0;
+    let divergence = null;
+    if (Math.abs(x) > 0.03 && Math.abs(pc) > 3e-4 && Math.sign(x) !== Math.sign(pc)) {
+      divergence = pc > 0 ? "bear" : "bull";
+    }
+    return { x, delta: d, priceChange: pc, divergence };
+  }
+  function bookImbalance(bids, asks, decayBps = 8, levels = 20) {
+    if (!bids.length || !asks.length) return null;
+    const mid = (bids[0][0] + asks[0][0]) / 2;
+    const side = (arr) => {
+      let s = 0;
+      for (const [p, q2] of arr.slice(0, levels)) s += q2 * Math.exp(-(Math.abs(mid - p) / mid) * 1e4 / decayBps);
+      return s;
+    };
+    const B = side(bids), A = side(asks);
+    return B + A > 0 ? (B - A) / (B + A) : 0;
+  }
+  function vwapZ(price, vwap, sd) {
+    const floor = price * 2e-4;
+    return (price - vwap) / Math.max(sd, floor);
+  }
+  function oiPriceSignal(dOiPct, dPricePct) {
+    if (!Number.isFinite(dOiPct) || !Number.isFinite(dPricePct)) return null;
+    if (Math.abs(dPricePct) < 0.01) return 0;
+    const conviction = dOiPct > 0 ? 1 : 0.4;
+    return Math.sign(dPricePct) * conviction * Math.tanh(Math.abs(dOiPct) / 0.05);
+  }
+  function oiLabel(dOiPct, dPricePct) {
+    if (!Number.isFinite(dOiPct) || !Number.isFinite(dPricePct) || Math.abs(dPricePct) < 0.01) return "neutro";
+    const up = dPricePct > 0;
+    if (dOiPct > 0) return up ? "nuovi long" : "nuovi short";
+    return up ? "short covering" : "long liquidati";
+  }
+  function composite(parts, weights) {
+    let sw = 0, s = 0;
+    for (const k of Object.keys(weights)) {
+      const v = parts[k];
+      if (v == null || !Number.isFinite(v)) continue;
+      s += weights[k] * v;
+      sw += weights[k];
+    }
+    return sw > 0 ? s / sw : 0;
+  }
+  var toBuyersPct = (score) => 50 + 50 * clamp(score, -1, 1);
+  function regime(prev, score, enter = 0.15, exit = 0.05) {
+    if (prev === "buy") return score > exit ? "buy" : score < -enter ? "sell" : "flat";
+    if (prev === "sell") return score < -exit ? "sell" : score > enter ? "buy" : "flat";
+    return score > enter ? "buy" : score < -enter ? "sell" : "flat";
+  }
+  function realizedVol(c1m, n = 60) {
+    const w = c1m.slice(-(n + 1));
+    if (w.length < 3) return null;
+    const r = [];
+    for (let i = 1; i < w.length; i++) r.push(Math.log(w[i].c / w[i - 1].c));
+    const m = r.reduce((a, b) => a + b, 0) / r.length;
+    const sd = Math.sqrt(r.reduce((a, b) => a + (b - m) ** 2, 0) / (r.length - 1));
+    return sd * Math.sqrt(525600) * 100;
+  }
+  function priceDecimals(price) {
+    return price >= 5e4 ? 1 : price >= 100 ? 2 : price >= 1 ? 3 : 5;
+  }
+
+  // src/session.js
+  var DAY2 = 864e5;
+  var H = 36e5;
+  var nyFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "longOffset" });
+  var cache = /* @__PURE__ */ new Map();
+  function nyOffset(t) {
+    const k = Math.floor(t / H);
+    let v = cache.get(k);
+    if (v === void 0) {
+      const name = nyFmt.formatToParts(new Date(t)).find((p) => p.type === "timeZoneName")?.value || "";
+      const m = /GMT([+-])(\d{2}):(\d{2})/.exec(name);
+      v = m ? (m[1] === "-" ? -1 : 1) * (+m[2] * H + +m[3] * 6e4) : 0;
+      if (cache.size > 5e3) cache.clear();
+      cache.set(k, v);
+    }
+    return v;
+  }
+  function makeSessionId(spec = "utc") {
+    if (spec === "us") return (t) => Math.floor((t + nyOffset(t) - 9.5 * H) / DAY2);
+    const m = /^(\d{1,2}):(\d{2})$/.exec(spec);
+    if (m) {
+      const off = +m[1] * H + +m[2] * 6e4;
+      return (t) => Math.floor((t - off) / DAY2);
+    }
+    return (t) => Math.floor(t / DAY2);
+  }
+
+  // src/engine.js
+  var MAX_1M = 1600;
+  var BIN_KEEP_S = 900;
+  var Engine = class {
+    constructor(cfg2) {
+      this.cfg = cfg2;
+      this.sessionId = makeSessionId(cfg2.session);
+      this.c1m = [];
+      this.bins = [];
+      this.book = { bids: [], asks: [] };
+      this.obi = null;
+      this.oiHist = [];
+      this.mark = null;
+      this.funding = null;
+      this.nextFunding = null;
+      this.liqs = [];
+      this.last = null;
+      this.smooth = null;
+      this.regime = "flat";
+    }
+    /** klines REST: [openTime, o, h, l, c, vol, closeTime, quoteVol, trades, takerBuyBase, ...] */
+    setHistory(klines) {
+      this.c1m = klines.map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], bv: +k[9] }));
+    }
+    /** evento stream kline_1m: k.V = volume taker-buy base */
+    onKline(k) {
+      const c = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, bv: +k.V };
+      const last = this.c1m[this.c1m.length - 1];
+      if (last && last.t === c.t) this.c1m[this.c1m.length - 1] = c;
+      else if (!last || c.t > last.t) {
+        this.c1m.push(c);
+        if (this.c1m.length > MAX_1M) this.c1m.shift();
+      }
+    }
+    /** evento aggTrade: m = true -> il buyer è maker -> aggressore VENDITORE */
+    onAggTrade(d) {
+      const p = +d.p, q2 = +d.q, sec = Math.floor(d.T / 1e3);
+      this.last = p;
+      let b = this.bins[this.bins.length - 1];
+      if (!b || sec > b.s) {
+        b = { s: sec, buy: 0, sell: 0, lbuy: 0, lsell: 0 };
+        this.bins.push(b);
+        while (this.bins.length && this.bins[0].s < sec - BIN_KEEP_S) this.bins.shift();
+      }
+      const large = p * q2 >= this.cfg.largeLotUsd;
+      if (d.m) {
+        b.sell += q2;
+        if (large) b.lsell += q2;
+      } else {
+        b.buy += q2;
+        if (large) b.lbuy += q2;
+      }
+    }
+    /** evento depth (partial book): b/a = [[prezzo, qty], ...] come stringhe */
+    onDepth(d) {
+      const parse = (a) => (a || []).map(([p, q2]) => [+p, +q2]);
+      this.book = { bids: parse(d.b ?? d.bids), asks: parse(d.a ?? d.asks) };
+      const raw = bookImbalance(this.book.bids, this.book.asks, this.cfg.book.decayBps, this.cfg.book.levels);
+      if (raw != null) this.obi = ema(this.obi, raw, this.cfg.book.emaAlpha);
+    }
+    onMark(d) {
+      this.mark = +d.p;
+      this.funding = +d.r;
+      this.nextFunding = d.T;
+    }
+    /** forceOrder: S = 'SELL' significa che una posizione LONG è stata liquidata */
+    onForce(d) {
+      const o = d.o || d;
+      this.liqs.push({ t: o.T, longLiq: o.S === "SELL", usd: +o.ap * +o.q });
+      const cut = Date.now() - 15 * 6e4;
+      while (this.liqs.length && this.liqs[0].t < cut) this.liqs.shift();
+    }
+    onOI(v, t = Date.now()) {
+      this.oiHist.push({ t, v });
+      const cut = t - 40 * 6e4;
+      while (this.oiHist.length && this.oiHist[0].t < cut) this.oiHist.shift();
+    }
+    _oi() {
+      const h = this.oiHist;
+      if (!h.length) return null;
+      const cur = h[h.length - 1];
+      let pct = null;
+      const target = cur.t - this.cfg.oiWindowMin * 6e4;
+      for (let i = h.length - 1; i >= 0; i--) {
+        if (h[i].t <= target) {
+          if (cur.t - h[i].t <= (this.cfg.oiWindowMin + 3) * 6e4) pct = (cur.v / h[i].v - 1) * 100;
+          break;
+        }
+      }
+      return { value: cur.v, pct };
+    }
+    /** Istantanea grezza (senza smoothing). */
+    snapshot(tf2, now = Date.now()) {
+      if (!this.c1m.length) return null;
+      const c1 = withVwap(this.c1m, this.sessionId);
+      const lastC = c1[c1.length - 1];
+      const price = this.last ?? lastC.c;
+      const candles = aggregate(c1, tf2);
+      const sid = this.sessionId(lastC.t);
+      const dayOpen = (c1.find((c) => this.sessionId(c.t) === sid) || c1[0]).o;
+      const dayPct = (price / dayOpen - 1) * 100;
+      const { windowsMin, blend } = this.cfg.flow;
+      const flows = windowsMin.map((m) => flowFromBins(this.bins, now, m * 6e4));
+      const flowX = flows.reduce((s, f, i) => s + f.x * blend[i], 0);
+      const f5 = flows[Math.max(0, windowsMin.indexOf(5))];
+      const lotTot = f5.lbuy + f5.lsell;
+      const lotConf = Math.min(1, lotTot * price / (5 * this.cfg.largeLotUsd));
+      const cvd = cvdSignal(c1, this.cfg.cvdWindowMin);
+      const sd = Math.max(lastC.sd, price * 2e-4);
+      const z = vwapZ(price, lastC.vwap, lastC.sd);
+      const oi = this._oi();
+      const ago = c1[c1.length - 1 - this.cfg.oiWindowMin];
+      const dP = ago ? (price / ago.c - 1) * 100 : null;
+      const oiSig = oi && oi.pct != null && dP != null ? oiPriceSignal(oi.pct, dP) : null;
+      const parts = {
+        flow: squash(flowX, 0.15),
+        large: squash(f5.lx, 0.4) * lotConf,
+        cvd: squash(cvd.x, 0.1),
+        obi: this.obi == null ? null : squash(this.obi, 0.25),
+        vwap: squash(z, 1.5),
+        oi: oiSig
+      };
+      const score = composite(parts, this.cfg.weights);
+      const { bids, asks } = this.book;
+      const spreadBps = bids.length && asks.length ? (asks[0][0] - bids[0][0]) / price * 1e4 : null;
+      const liq5 = this.liqs.filter((l) => l.t >= now - 5 * 6e4);
+      return {
+        now,
+        price,
+        dayPct,
+        candles,
+        sessionId: this.sessionId,
+        vwap: lastC.vwap,
+        sd,
+        z,
+        parts,
+        score,
+        raw: { flowX, flows, f5, cvd, obi: this.obi, oi, dP, lotTot },
+        funding: this.funding,
+        nextFunding: this.nextFunding,
+        spreadBps,
+        vol: realizedVol(c1, 60),
+        liq: {
+          long: liq5.filter((l) => l.longLiq).reduce((s, l) => s + l.usd, 0),
+          short: liq5.filter((l) => !l.longLiq).reduce((s, l) => s + l.usd, 0)
+        }
+      };
+    }
+    /** Istantanea + smoothing EMA + verdetto con isteresi. Da chiamare a cadenza fissa. */
+    tick(tf2, now = Date.now()) {
+      const s = this.snapshot(tf2, now);
+      if (!s) return null;
+      this.smooth = ema(this.smooth, s.score, this.cfg.smoothing);
+      this.regime = regime(this.regime, this.smooth, this.cfg.regime.enter, this.cfg.regime.exit);
+      s.score = this.smooth;
+      s.regime = this.regime;
+      s.buyersPct = toBuyersPct(this.smooth);
+      return s;
+    }
+  };
+
+  // src/feed.js
+  async function loadHistory(cfg2, engine2) {
+    const r = await fetch(`${cfg2.rest}/fapi/v1/klines?symbol=${cfg2.symbol}&interval=1m&limit=1500`);
+    if (r.status === 400) throw new Error(`Simbolo ${cfg2.symbol} non trovato su Binance Futures`);
+    if (!r.ok) throw new Error(r.status === 451 ? "Area geo-bloccata da Binance (HTTP 451)" : `Storico non disponibile (HTTP ${r.status})`);
+    engine2.setHistory(await r.json());
+  }
+  function route(engine2, d) {
+    switch (d.e) {
+      case "aggTrade":
+        engine2.onAggTrade(d);
+        break;
+      case "kline":
+        engine2.onKline(d.k);
+        break;
+      case "depthUpdate":
+        engine2.onDepth(d);
+        break;
+      case "markPriceUpdate":
+        engine2.onMark(d);
+        break;
+      case "forceOrder":
+        engine2.onForce(d);
+        break;
+    }
+  }
+  function startLive(cfg2, engine2, onStatus2) {
+    const sym = cfg2.symbol.toLowerCase();
+    const streams = [`${sym}@aggTrade`, `${sym}@kline_1m`, `${sym}@depth20@100ms`, `${sym}@markPrice@1s`, `${sym}@forceOrder`].join("/");
+    let ws = null, stopped = false, retry = 0, lastMsg = 0, timer = null;
+    const schedule = () => {
+      if (stopped) return;
+      retry += 1;
+      onStatus2("reconnecting", `tentativo ${retry}`);
+      timer = setTimeout(connect, Math.min(15e3, 500 * 2 ** Math.min(retry, 6)));
+    };
+    async function connect() {
+      if (stopped) return;
+      onStatus2("connecting");
+      try {
+        await loadHistory(cfg2, engine2);
+      } catch (e) {
+        onStatus2("error", e.message);
+        return schedule();
+      }
+      const me = new WebSocket(`${cfg2.ws}?streams=${streams}`);
+      ws = me;
+      me.onopen = () => {
+        retry = 0;
+        lastMsg = Date.now();
+        onStatus2("live");
+      };
+      me.onmessage = (ev) => {
+        lastMsg = Date.now();
+        try {
+          const m = JSON.parse(ev.data);
+          route(engine2, m.data || m);
+        } catch {
+        }
+      };
+      me.onerror = () => me.close();
+      me.onclose = () => {
+        if (ws === me) schedule();
+      };
+    }
+    const watchdog = setInterval(() => {
+      if (ws && ws.readyState === 1 && Date.now() - lastMsg > 1e4) ws.close();
+    }, 5e3);
+    const pollOI = async () => {
+      try {
+        const r = await fetch(`${cfg2.rest}/fapi/v1/openInterest?symbol=${cfg2.symbol}`);
+        if (r.ok) {
+          const j = await r.json();
+          engine2.onOI(+j.openInterest, j.time || Date.now());
+        }
+      } catch {
+      }
+    };
+    const oiTimer = setInterval(pollOI, 1e4);
+    pollOI();
+    connect();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      clearInterval(watchdog);
+      clearInterval(oiTimer);
+      if (ws) ws.close();
+    };
+  }
+  function startDemo(cfg2, engine2, onStatus2) {
+    const rnd = /* @__PURE__ */ (() => {
+      let s = 42;
+      return () => (s = s * 1664525 + 1013904223 >>> 0) / 4294967296;
+    })();
+    const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+    let price = 78e3, now = Date.now();
+    const start = Math.floor(now / 6e4) * 6e4 - 1499 * 6e4;
+    const ks = [];
+    for (let i = 0; i < 1500; i++) {
+      const o = price;
+      price *= 1 + gauss() * 4e-4;
+      const h = Math.max(o, price) * (1 + rnd() * 2e-4), l = Math.min(o, price) * (1 - rnd() * 2e-4);
+      const v = 40 + rnd() * 80, bv = v * (0.5 + gauss() * 0.04);
+      ks.push([start + i * 6e4, o, h, l, price, v, 0, 0, 0, bv]);
+    }
+    engine2.setHistory(ks);
+    engine2.last = price;
+    let bias = 0.55, oi = 82e3;
+    engine2.onMark({ p: price, r: 1e-4, T: Date.now() + 36e5 });
+    onStatus2("demo");
+    const cur = () => engine2.c1m[engine2.c1m.length - 1];
+    const t1 = setInterval(() => {
+      bias += (0.5 - bias) * 2e-3 + gauss() * 0.01;
+      bias = Math.min(0.8, Math.max(0.2, bias));
+      for (let i = 0; i < 6; i++) {
+        const buy = rnd() < bias, q2 = rnd() < 0.03 ? 2 + rnd() * 6 : rnd() * 0.4;
+        price *= 1 + (buy ? 1 : -1) * 4e-6 * (1 + q2) + gauss() * 4e-6;
+        const T = Date.now();
+        engine2.onAggTrade({ p: price, q: q2, T, m: !buy });
+        const c = cur(), minute = Math.floor(T / 6e4) * 6e4;
+        engine2.onKline(c && c.t === minute ? { t: c.t, o: c.o, h: Math.max(c.h, price), l: Math.min(c.l, price), c: price, v: c.v + q2, V: c.bv + (buy ? q2 : 0) } : { t: minute, o: price, h: price, l: price, c: price, v: q2, V: buy ? q2 : 0 });
+      }
+    }, 50);
+    const t2 = setInterval(() => {
+      const lean = (bias - 0.5) * 2, mk = (dir) => Array.from({ length: 20 }, (_, i) => [
+        (price + dir * (0.5 + i * 0.5)).toFixed(1),
+        ((1 + rnd() * 3) * (1 + dir * lean * 0.6)).toFixed(3)
+      ]);
+      engine2.onDepth({ b: mk(-1), a: mk(1) });
+      engine2.onMark({ p: price, r: 1e-4, T: Date.now() + 36e5 });
+      if (rnd() < 0.05) engine2.onForce({ o: { T: Date.now(), S: rnd() < 0.5 ? "SELL" : "BUY", ap: price, q: 0.5 + rnd() * 4 } });
+    }, 250);
+    const t3 = setInterval(() => {
+      oi += (bias - 0.5) * 40 + gauss() * 8;
+      engine2.onOI(oi);
+    }, 2e3);
+    engine2.onOI(oi);
+    return () => {
+      clearInterval(t1);
+      clearInterval(t2);
+      clearInterval(t3);
+    };
+  }
+
+  // src/chart.js
+  var C = {
+    grid: "rgba(120,170,180,0.10)",
+    axis: "#6f8c93",
+    up: "#3b9bff",
+    down: "#ff6a2b",
+    vwap: "#ffb020",
+    band: "rgba(255,176,32,0.09)",
+    last: "#e9f3f4",
+    lastTxt: "#06161c",
+    recent: "rgba(255,61,113,0.07)",
+    recentTag: "#ff3d71",
+    cross: "rgba(233,243,244,0.35)"
+  };
+  var niceStep = (range, target) => {
+    const raw = range / target, p = 10 ** Math.floor(Math.log10(raw)), n = raw / p;
+    return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * p;
+  };
+  var fmtP = (p, d, fixed = false) => p.toLocaleString("it-IT", { minimumFractionDigits: fixed ? d : 0, maximumFractionDigits: d });
+  var fmtT = (t) => new Date(t).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  var Chart = class {
+    constructor(canvas, { visible = 64, onHover = () => {
+    } } = {}) {
+      this.cv = canvas;
+      this.ctx = canvas.getContext("2d");
+      this.visible = visible;
+      this.onHover = onHover;
+      this.data = null;
+      this.hoverIdx = null;
+      this.dirty = true;
+      new ResizeObserver(() => {
+        this.dirty = true;
+        this.draw();
+      }).observe(canvas);
+      const move = (e) => {
+        if (!this.geo) return;
+        const r = canvas.getBoundingClientRect(), x = e.clientX - r.left;
+        const i = Math.round((x - this.geo.x0) / this.geo.step);
+        this.hoverIdx = i >= 0 && i < this.geo.n ? i : null;
+        this.onHover(this.hoverIdx == null ? null : this.geo.slice[this.hoverIdx]);
+        this.dirty = true;
+        this.draw();
+      };
+      const leave = () => {
+        this.hoverIdx = null;
+        this.onHover(null);
+        this.dirty = true;
+        this.draw();
+      };
+      canvas.addEventListener("pointermove", move);
+      canvas.addEventListener("pointerdown", move);
+      canvas.addEventListener("pointerleave", leave);
+    }
+    setData(d) {
+      this.data = d;
+      this.dirty = true;
+    }
+    draw() {
+      if (!this.dirty || !this.data) return;
+      this.dirty = false;
+      const cv = this.cv, dpr = window.devicePixelRatio || 1;
+      const W = cv.clientWidth, H2 = cv.clientHeight;
+      if (!W || !H2) return;
+      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H2 * dpr)) {
+        cv.width = Math.round(W * dpr);
+        cv.height = Math.round(H2 * dpr);
+      }
+      const g = this.ctx;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, W, H2);
+      const slice = this.data.candles.slice(-this.visible), n = slice.length, dec2 = this.data.dec ?? 1;
+      if (n < 2) return;
+      const padR = 58, padT = 8, padB = 18, gap = 8;
+      const deltaH = Math.round((H2 - padT - padB) * 0.18);
+      const priceB = H2 - padB - deltaH - gap, priceH = priceB - padT;
+      const slots = n + 3, step = (W - padR - 4) / slots, bw = Math.max(1, Math.min(10, step * 0.62)), x0 = step * 0.5 + 2;
+      const xAt = (i) => x0 + i * step;
+      let lo = Infinity, hi = -Infinity;
+      for (const c of slice) {
+        lo = Math.min(lo, c.l, c.vwap);
+        hi = Math.max(hi, c.h, c.vwap);
+      }
+      const pad = (hi - lo) * 0.08 || 1;
+      lo -= pad;
+      hi += pad;
+      const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * priceH;
+      this.geo = { x0, step, n, slice };
+      g.font = '10px "IBM Plex Mono", ui-monospace, monospace';
+      g.textBaseline = "middle";
+      g.textAlign = "left";
+      const st = niceStep(hi - lo, 5);
+      for (let p = Math.ceil(lo / st) * st; p < hi; p += st) {
+        g.strokeStyle = C.grid;
+        g.beginPath();
+        g.moveTo(0, y(p));
+        g.lineTo(W - padR, y(p));
+        g.stroke();
+        g.fillStyle = C.axis;
+        g.fillText(fmtP(p, dec2), W - padR + 6, y(p));
+      }
+      const now = this.data.now, recentIdx = slice.findIndex((c) => c.t >= now - 30 * 6e4);
+      if (recentIdx >= 0 && recentIdx < n - 1) {
+        const xr = xAt(recentIdx) - step / 2;
+        g.fillStyle = C.recent;
+        g.fillRect(xr, padT, W - padR - xr, priceH);
+        g.font = '600 9px "IBM Plex Mono", ui-monospace, monospace';
+        const label = "ultima mezz\u2019ora", tw = g.measureText(label).width + 10;
+        const lx = Math.max(0, Math.min(xr, W - padR - tw));
+        g.fillStyle = C.recentTag;
+        g.fillRect(lx, priceB - 14, tw, 13);
+        g.fillStyle = "#fff";
+        g.textAlign = "left";
+        g.fillText(label, lx + 5, priceB - 7.5);
+      }
+      g.save();
+      g.beginPath();
+      g.rect(0, padT, W - padR, priceH);
+      g.clip();
+      const sid = this.data.sessionId || ((t) => Math.floor(t / 864e5)), dayOf = (c) => sid(c.t), segs = [];
+      slice.forEach((c, i) => {
+        if (!i || dayOf(c) !== dayOf(slice[i - 1])) segs.push([i, i]);
+        else segs[segs.length - 1][1] = i;
+      });
+      for (const [a, b] of segs) {
+        g.beginPath();
+        for (let i = a; i <= b; i++) (i === a ? g.moveTo : g.lineTo).call(g, xAt(i), y(slice[i].vwap + slice[i].sd));
+        for (let i = b; i >= a; i--) g.lineTo(xAt(i), y(slice[i].vwap - slice[i].sd));
+        g.closePath();
+        g.fillStyle = C.band;
+        g.fill();
+        g.beginPath();
+        for (let i = a; i <= b; i++) (i === a ? g.moveTo : g.lineTo).call(g, xAt(i), y(slice[i].vwap));
+        g.strokeStyle = C.vwap;
+        g.lineWidth = 1.4;
+        g.stroke();
+        g.lineWidth = 1;
+      }
+      slice.forEach((c, i) => {
+        const x = xAt(i), up = c.c >= c.o;
+        g.strokeStyle = g.fillStyle = up ? C.up : C.down;
+        g.beginPath();
+        g.moveTo(x, y(c.h));
+        g.lineTo(x, y(c.l));
+        g.stroke();
+        const top = y(Math.max(c.o, c.c)), h = Math.max(1, Math.abs(y(c.o) - y(c.c)));
+        g.fillRect(x - bw / 2, top, bw, h);
+      });
+      g.restore();
+      const lastC = slice[n - 1], price = this.data.price;
+      const tag = (p, txt, bg, fg) => {
+        const yy = Math.min(priceB - 7, Math.max(padT + 7, y(p)));
+        g.fillStyle = bg;
+        g.fillRect(W - padR + 2, yy - 8, padR - 3, 16);
+        g.fillStyle = fg;
+        g.font = '600 10px "IBM Plex Mono", ui-monospace, monospace';
+        g.textAlign = "left";
+        g.fillText(txt, W - padR + 5, yy);
+      };
+      g.setLineDash([2, 3]);
+      g.strokeStyle = "rgba(233,243,244,0.55)";
+      g.beginPath();
+      g.moveTo(0, y(price));
+      g.lineTo(W - padR, y(price));
+      g.stroke();
+      g.setLineDash([]);
+      tag(lastC.vwap, fmtP(lastC.vwap, dec2, true), C.vwap, "#2a1c00");
+      tag(price, fmtP(price, dec2, true), C.last, C.lastTxt);
+      const dTop = priceB + gap, dMid = dTop + deltaH / 2;
+      const deltas = slice.map((c) => 2 * c.bv - c.v), dMax = Math.max(1e-9, ...deltas.map(Math.abs));
+      g.strokeStyle = C.grid;
+      g.beginPath();
+      g.moveTo(0, dMid);
+      g.lineTo(W - padR, dMid);
+      g.stroke();
+      deltas.forEach((d, i) => {
+        const h = Math.abs(d) / dMax * (deltaH / 2 - 1);
+        g.fillStyle = d >= 0 ? C.up : C.down;
+        g.globalAlpha = 0.85;
+        g.fillRect(xAt(i) - bw / 2, d >= 0 ? dMid - h : dMid, bw, Math.max(1, h));
+        g.globalAlpha = 1;
+      });
+      g.fillStyle = C.axis;
+      g.font = '10px "IBM Plex Mono", ui-monospace, monospace';
+      g.textAlign = "left";
+      g.fillText("\u0394 volume", W - padR + 6, dMid);
+      g.textAlign = "center";
+      const every = Math.max(1, Math.round(60 / step));
+      for (let i = n - 1; i >= 0; i -= every) {
+        g.fillStyle = C.axis;
+        g.fillText(fmtT(slice[i].t), xAt(i), H2 - 7);
+      }
+      if (this.hoverIdx != null && this.hoverIdx < n) {
+        const x = xAt(this.hoverIdx);
+        g.strokeStyle = C.cross;
+        g.beginPath();
+        g.moveTo(x, padT);
+        g.lineTo(x, H2 - padB);
+        g.stroke();
+      }
+    }
+  };
+
+  // src/main.js
+  var q = new URLSearchParams(location.search);
+  var cfg = {
+    ...CONFIG,
+    symbol: (q.get("symbol") || CONFIG.symbol).toUpperCase(),
+    session: q.get("session") || CONFIG.session,
+    largeLotUsd: Number(q.get("lot")) || CONFIG.largeLotUsd
+  };
+  var tf = Number(q.get("tf")) || cfg.defaultTf;
+  var demo = q.has("demo");
+  var $ = (id) => document.getElementById(id);
+  var nf = (d) => new Intl.NumberFormat("it-IT", { minimumFractionDigits: d, maximumFractionDigits: d });
+  var f1 = nf(1);
+  var f2 = nf(2);
+  var f3 = nf(3);
+  var f4 = nf(4);
+  var dec = 1;
+  var P = f1;
+  var compact = { format: (n) => Math.abs(n) >= 1e6 ? f1.format(n / 1e6) + " M" : Math.abs(n) >= 1e3 ? f1.format(n / 1e3) + " k" : f1.format(n) };
+  var sgn = (x, f = f2) => (x > 0 ? "+" : "") + f.format(x);
+  var base = cfg.symbol.replace(/(USDT|USDC|BUSD)$/, "");
+  $("sym").textContent = base;
+  $("sub").textContent = `Perpetual ${cfg.symbol} \xB7 ${demo ? "dati sintetici di prova" : "dati Binance Futures"}`;
+  document.title = `${base} flow \xB7 Flowboard`;
+  var tfSel = $("tf");
+  for (const m of cfg.timeframes) tfSel.add(new Option(m >= 60 ? `${m / 60}h` : `${m}m`, m, false, m === tf));
+  if (![...tfSel.options].some((o) => +o.value === tf)) tfSel.add(new Option(`${tf}m`, tf, true, true));
+  tfSel.addEventListener("change", () => {
+    tf = +tfSel.value;
+    tick();
+  });
+  var ROWS = [
+    { id: "flow", k: "Flusso taker", sub: "acquisti vs vendite a mercato, 1/5/15 min" },
+    { id: "large", k: "Lotti grandi", sub: `ordini singoli da ${compact.format(cfg.largeLotUsd)} $ in su, 5 min` },
+    { id: "cvd", k: `Delta cumulato ${cfg.cvdWindowMin}m`, sub: "volume netto aggressivo" },
+    { id: "obi", k: "Order book", sub: "sbilanciamento bid/ask pesato per distanza" },
+    { id: "vwap", k: "Prezzo vs VWAP", sub: "distanza in deviazioni standard" },
+    { id: "oi", k: "Open interest", sub: "posizioni aperte vs direzione del prezzo, 5 min" }
+  ];
+  var rowEl = {};
+  for (const r of ROWS) {
+    const li = document.createElement("li");
+    li.className = "row";
+    li.innerHTML = `<div class="k">${r.k}<small>${r.sub}</small></div><div class="v">\u2013</div><div class="meter"><i></i></div>`;
+    $("rows").append(li);
+    rowEl[r.id] = { v: li.querySelector(".v"), i: li.querySelector(".meter i"), k: li.querySelector(".k") };
+  }
+  var STATS = ["funding", "oi", "spread", "vol", "liq", "sigma"];
+  var statEl = {};
+  var statLabels = { funding: "Funding", oi: "Open interest", spread: "Spread", vol: "Volatilit\xE0 1h (ann.)", liq: "Liquidazioni 5m", sigma: "Distanza dal VWAP" };
+  for (const id of STATS) {
+    const d = document.createElement("div");
+    d.className = "stat";
+    d.innerHTML = `<span>${statLabels[id]}</span><b>\u2013</b> <small></small>`;
+    $("stats").append(d);
+    statEl[id] = { b: d.querySelector("b"), s: d.querySelector("small") };
+  }
+  var engine = new Engine(cfg);
+  var chart = new Chart($("chart"), {
+    onHover: (c) => {
+      $("ohlc").textContent = c ? `${new Date(c.t).toLocaleString("it-IT", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}  O ${P.format(c.o)}  H ${P.format(c.h)}  L ${P.format(c.l)}  C ${P.format(c.c)}  \u0394 ${sgn(2 * c.bv - c.v, f1)}` : "";
+    }
+  });
+  var STATUS = {
+    connecting: ["connessione\u2026", ""],
+    live: ["in diretta", "live"],
+    demo: ["demo", "demo"],
+    reconnecting: ["riconnessione\u2026", "err"],
+    error: ["errore", "err"]
+  };
+  var lastErr = "";
+  var onStatus = (s, detail) => {
+    const [txt, cls] = STATUS[s] || [s, ""];
+    const el = $("status");
+    el.textContent = txt;
+    el.className = `status ${cls}`;
+    lastErr = s === "error" ? detail || "" : s === "live" ? "" : lastErr;
+    $("note").textContent = lastErr;
+  };
+  var VERDICT = {
+    buy: ["I compratori stanno vincendo", "Compratori in vantaggio"],
+    sell: ["I venditori stanno vincendo", "Venditori in vantaggio"],
+    flat: ["Mercato in equilibrio", "Equilibrio"]
+  };
+  function meter(el, score) {
+    const s = Math.max(-1, Math.min(1, score ?? 0)), w = Math.abs(s) * 50;
+    el.i.className = s >= 0 ? "pos" : "neg";
+    el.i.style.left = (s >= 0 ? 50 : 50 - w) + "%";
+    el.i.style.width = w + "%";
+  }
+  function render(s) {
+    const nd = priceDecimals(s.price);
+    if (nd !== dec) {
+      dec = nd;
+      P = nf(nd);
+    }
+    $("price").textContent = P.format(s.price);
+    const d = $("dayPct");
+    d.textContent = `${sgn(s.dayPct)} % ${cfg.session === "utc" ? "oggi (UTC)" : "da apertura sessione"}`;
+    d.className = "day " + (s.dayPct >= 0 ? "up" : "dn");
+    const b = Math.round(s.buyersPct), v = 100 - b;
+    for (const id of ["bPctMini", "bPct"]) $(id).textContent = b + "%";
+    for (const id of ["sPctMini", "sPct"]) $(id).textContent = v + "%";
+    for (const id of ["barBuy", "barBuy2"]) $(id).style.width = s.buyersPct + "%";
+    for (const id of ["barSell", "barSell2"]) $(id).style.width = 100 - s.buyersPct + "%";
+    const h = $("headline");
+    h.textContent = VERDICT[s.regime][0];
+    h.className = "headline " + s.regime;
+    const vd = $("verdict");
+    vd.textContent = VERDICT[s.regime][1];
+    vd.className = "verdict " + s.regime;
+    const r = s.raw, p = s.parts;
+    const set = (id, txt, sc) => {
+      rowEl[id].v.textContent = txt;
+      meter(rowEl[id], sc);
+    };
+    set("flow", `${sgn(r.flowX * 100, f1)}%`, p.flow);
+    set("large", r.lotTot > 0 ? `\u0394 ${sgn(r.f5.lbuy - r.f5.lsell, f1)} ${base}` : "nessun lotto", p.large);
+    set("cvd", `\u0394 ${sgn(r.cvd.delta, f1)} ${base}`, p.cvd);
+    rowEl.cvd.k.querySelector(".tag")?.remove();
+    if (r.cvd.divergence) {
+      const t = document.createElement("span");
+      t.className = "tag";
+      t.textContent = r.cvd.divergence === "bear" ? "rialzo debole" : "ribasso debole";
+      rowEl.cvd.k.firstChild.after(t);
+    }
+    set("obi", r.obi == null ? "n/d" : sgn(r.obi, f2), p.obi);
+    set("vwap", `${sgn(s.z, f1)} \u03C3`, p.vwap);
+    set("oi", r.oi && r.oi.pct != null ? `${sgn(r.oi.pct, f3)}% \xB7 ${oiLabel(r.oi.pct, r.dP)}` : r.oi ? "in raccolta\u2026" : "n/d", p.oi);
+    statEl.funding.b.textContent = s.funding == null ? "\u2013" : `${sgn(s.funding * 100, f4)}%`;
+    if (s.nextFunding) {
+      const m = Math.max(0, Math.round((s.nextFunding - s.now) / 6e4));
+      statEl.funding.s.textContent = `tra ${Math.floor(m / 60)}h ${m % 60}m`;
+    }
+    statEl.oi.b.textContent = r.oi ? compact.format(r.oi.value) : "\u2013";
+    statEl.oi.s.textContent = base;
+    statEl.spread.b.textContent = s.spreadBps == null ? "\u2013" : f2.format(s.spreadBps);
+    statEl.spread.s.textContent = "bps";
+    statEl.vol.b.textContent = s.vol == null ? "\u2013" : f1.format(s.vol) + "%";
+    statEl.liq.b.textContent = `${compact.format(s.liq.long)} / ${compact.format(s.liq.short)}`;
+    statEl.liq.s.textContent = "long / short $";
+    statEl.sigma.b.textContent = `${sgn(s.z, f1)} \u03C3`;
+    statEl.sigma.s.textContent = `VWAP ${P.format(s.vwap)}`;
+    chart.setData({ candles: s.candles, price: s.price, now: s.now, sessionId: s.sessionId, dec });
+  }
+  function tick() {
+    const s = engine.tick(tf);
+    if (s) render(s);
+  }
+  setInterval(tick, cfg.tickMs);
+  (function loop() {
+    chart.draw();
+    requestAnimationFrame(loop);
+  })();
+  if (demo) startDemo(cfg, engine, onStatus);
+  else startLive(cfg, engine, onStatus);
+})();
+
+</script>
+</body>
+</html>
